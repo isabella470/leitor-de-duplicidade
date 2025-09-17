@@ -1,22 +1,14 @@
-import streamlit as st
-import pandas as pd
 from io import BytesIO
+import pandas as pd
 from openpyxl import load_workbook
 from openpyxl.styles import PatternFill
 
-st.title("Validação de Duplicados")
-
-uploaded_file = st.file_uploader("Carregue sua planilha Excel", type=["xlsx"])
-
-if uploaded_file:
-    df = pd.read_excel(uploaded_file)
-
-    # Inicializar coluna de duplicidade
-    if "Duplicado_Linha" not in df.columns:
-        df["Duplicado_Linha"] = ""
-
+def marcar_duplicados_verde(df):
+    # Inicializar coluna de referência
+    df["Duplicado_Linha"] = ""
+    
     primeira_ocorrencia = {}
-
+    
     # Preencher a coluna Duplicado_Linha
     for idx, row in df.iterrows():
         conteudo = tuple(row.drop("Duplicado_Linha"))
@@ -25,7 +17,7 @@ if uploaded_file:
         else:
             primeira_ocorrencia[conteudo] = idx
 
-    # Salvar temporariamente em memória
+    # Salvar temporário em memória
     output = BytesIO()
     df.to_excel(output, index=False)
     output.seek(0)
@@ -33,7 +25,7 @@ if uploaded_file:
     wb = load_workbook(output)
     ws = wb.active
 
-    verde = PatternFill(start_color="90EE90", end_color="90EE90", fill_type="solid")  # verde claro
+    verde = PatternFill(start_color="90EE90", end_color="90EE90", fill_type="solid")  # duplicadas
     col_dup = df.columns.get_loc("Duplicado_Linha") + 1
 
     # Pintar apenas linhas que têm comentário na coluna Duplicado_Linha
@@ -43,15 +35,10 @@ if uploaded_file:
             for col in range(1, ws.max_column + 1):
                 ws.cell(row=row_idx, column=col).fill = verde
 
+    # Salvar resultado final em memória
     final_output = BytesIO()
     wb.save(final_output)
     final_output.seek(0)
 
-    st.success(f"Planilha processada! Total de duplicadas: {(df['Duplicado_Linha'] != '').sum()}")
-
-    st.download_button(
-        label="Baixar planilha com duplicados marcados",
-        data=final_output,
-        file_name="planilha_duplicados.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-    )
+    qtd_dup = (df["Duplicado_Linha"] != "").sum()
+    return final_output, qtd_dup
