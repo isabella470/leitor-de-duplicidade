@@ -33,22 +33,18 @@ def ler_planilha(caminho_ou_link):
     else:
         return pd.read_excel(caminho_ou_link)
 
-
 def marcar_duplicados_verde(df):
-    # Inicializar coluna de referência
+    # Coluna para referência
     df["Duplicado_Linha"] = ""
     
     primeira_ocorrencia = {}
     
     for idx, row in df.iterrows():
-        # Converter conteúdo da linha para tupla, excluindo coluna Duplicado_Linha
         conteudo = tuple(row.drop("Duplicado_Linha"))
-        
         if conteudo in primeira_ocorrencia:
-            # Segunda ocorrência em diante → indicar linha original
-            df.at[idx, "Duplicado_Linha"] = f"Conteúdo já presente na linha {primeira_ocorrencia[conteudo]+2}" 
+            # Segunda ocorrência em diante
+            df.at[idx, "Duplicado_Linha"] = f"Conteúdo já presente na linha {primeira_ocorrencia[conteudo]+2}"
         else:
-            # Primeira ocorrência → armazenar índice
             primeira_ocorrencia[conteudo] = idx
 
     # Salvar temporário
@@ -59,7 +55,7 @@ def marcar_duplicados_verde(df):
     wb = load_workbook(output)
     ws = wb.active
 
-    verde = PatternFill(start_color="90EE90", end_color="90EE90", fill_type="solid")  # duplicadas
+    verde = PatternFill(start_color="90EE90", end_color="90EE90", fill_type="solid")
     col_dup = df.columns.get_loc("Duplicado_Linha") + 1
 
     # Pintar apenas duplicadas (segunda ocorrência em diante)
