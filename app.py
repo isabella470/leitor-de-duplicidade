@@ -6,7 +6,7 @@ from openpyxl import load_workbook
 from openpyxl.styles import PatternFill
 
 st.set_page_config(page_title="Validador de Duplicados", layout="centered")
-st.title("📊 Validador de Duplicados")
+st.title("🎩✨ Validador de Duplicados")
 st.write("Suba uma planilha Excel ou informe o link público do Google Sheets para validar duplicados.")
 
 # ---------------- Funções ----------------
