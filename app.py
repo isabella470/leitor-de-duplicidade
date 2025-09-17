@@ -33,23 +33,20 @@ def ler_planilha(caminho_ou_link):
     else:
         return pd.read_excel(caminho_ou_link)
 
-def marcar_duplicados_avancado(df):
+
+def marcar_duplicados_avancado_cores(df):
     # Inicializar coluna de referência
     df["Duplicado_Linha"] = ""
     
-    # Criar um dicionário para rastrear primeira ocorrência de cada linha
     primeira_ocorrencia = {}
     
     for idx, row in df.iterrows():
-        # Converter conteúdo da linha para tupla para poder usar como chave
-        conteudo = tuple(row)
-        # Remover a coluna Duplicado_Linha da chave
-        conteudo = conteudo[:-1]
+        # Converter conteúdo da linha para tupla, excluindo coluna Duplicado_Linha
+        conteudo = tuple(row.drop("Duplicado_Linha"))
         
         if conteudo in primeira_ocorrencia:
-            # Se já apareceu, indicar a linha original (idx começa em 0)
+            # Segunda ocorrência em diante
             df.at[idx, "Duplicado_Linha"] = f"Conteúdo já presente na linha {primeira_ocorrencia[conteudo]+2}" 
-            # +2 porque planilha Excel começa em 1 e tem cabeçalho
         else:
             # Primeira ocorrência
             primeira_ocorrencia[conteudo] = idx
@@ -62,15 +59,25 @@ def marcar_duplicados_avancado(df):
     wb = load_workbook(output)
     ws = wb.active
 
-    amarelo = PatternFill(start_color="FFFF00", end_color="FFFF00", fill_type="solid")
+    amarelo = PatternFill(start_color="FFFF00", end_color="FFFF00", fill_type="solid")  # duplicadas
+    verde = PatternFill(start_color="90EE90", end_color="90EE90", fill_type="solid")    # primeira ocorrência
     col_dup = df.columns.get_loc("Duplicado_Linha") + 1
 
-    # Colorir apenas as linhas duplicadas (segunda ocorrência em diante)
-    for row in range(2, ws.max_row + 1):
-        cell_value = ws.cell(row=row, column=col_dup).value
-        if cell_value != "":
+    # Pintar células
+    conteudo_ja_pintado = {}
+    for row_idx in range(2, ws.max_row + 1):
+        # Criar tupla do conteúdo da linha (excluindo coluna Duplicado_Linha)
+        conteudo = tuple(ws.cell(row=row_idx, column=c+1).value for c in range(ws.max_column-1))
+        
+        if conteudo in conteudo_ja_pintado:
+            # Segunda ocorrência → amarelo
             for col in range(1, ws.max_column + 1):
-                ws.cell(row=row, column=col).fill = amarelo
+                ws.cell(row=row_idx, column=col).fill = amarelo
+        else:
+            # Primeira ocorrência → verde
+            for col in range(1, ws.max_column + 1):
+                ws.cell(row=row_idx, column=col).fill = verde
+            conteudo_ja_pintado[conteudo] = row_idx
 
     final_output = BytesIO()
     wb.save(final_output)
@@ -98,10 +105,10 @@ if df is not None:
     st.dataframe(df.head())
 
     if st.button("🔎 Validar Duplicados"):
-        arquivo_final, qtd_dup = marcar_duplicados_avancado(df)
+        arquivo_final, qtd_dup = marcar_duplicados_avancado_cores(df)
 
         if qtd_dup > 0:
-            st.success(f"✅ Foram encontradas {qtd_dup} linhas duplicadas (a partir da segunda ocorrência).")
+            st.success(f"✅ Foram encontradas {qtd_dup} linhas duplicadas (segunda ocorrência em diante).")
         else:
             st.info("Nenhuma linha duplicada encontrada.")
 
