@@ -1,3 +1,5 @@
+import re
+import numpy as np
 import pandas as pd
 import streamlit as st
 from io import BytesIO
@@ -35,22 +37,108 @@ def ler_planilha(caminho_ou_link):
         return pd.read_excel(caminho_ou_link)
 
 
-def marcar_duplicados_verde(df):
-    # Coluna para referência
+def _detectar_coluna(df, termos):
+    """Detecta primeira coluna cujo nome contenha qualquer um dos termos (case-insensitive)."""
+    lc = [c for c in df.columns]
+    for t in termos:
+        for c in lc:
+            if t in c.lower():
+                return c
+    return None
+
+
+def _parse_valor(v):
+    """Tenta converter diferentes formatos de valor para float (R$, 9.600,00, 9600.00, etc.)."""
+    if pd.isna(v):
+        return None
+    s = str(v).strip()
+    # remover símbolos de moeda e espaços
+    s = s.replace("R$", "").replace("r$", "").replace(" ", "")
+    # heurística brasileira: se contém vírgula, tratar ',' como separador decimal
+    if "," in s:
+        # remover pontos (milhares) e trocar vírgula por ponto
+        s2 = s.replace(".", "").replace(",", ".")
+    else:
+        s2 = s.replace(",", "")
+    # retirar caracteres que não sejam dígito, ponto ou sinal
+    s2 = re.sub(r"[^\d\.\-+]", "", s2)
+    try:
+        return float(s2)
+    except:
+        return None
+
+
+def _normalize_cliente(v):
+    if pd.isna(v):
+        return ""
+    if isinstance(v, (int, np.integer)):
+        return str(int(v))
+    if isinstance(v, float) and v.is_integer():
+        return str(int(v))
+    return str(v).strip().lower()
+
+
+def _normalizar_data_valor_cliente(row, date_col, client_col, value_col):
+    # data: converter para datetime e pegar .date() (ignorando hora)
+    raw_date = row.get(date_col, None)
+    try:
+        dt = pd.to_datetime(raw_date, dayfirst=True, errors="coerce")
+        d = dt.date() if not pd.isna(dt) else None
+    except:
+        d = None
+
+    cliente = _normalize_cliente(row.get(client_col, None))
+    valor = _parse_valor(row.get(value_col, None))
+    return d, cliente, valor
+
+
+def marcar_duplicados_vermelho(df):
+    # Detectar colunas mais prováveis
+    date_col = _detectar_coluna(df, ["data", "carimbo", "timestamp", "date"]) or df.columns[0]
+    client_col = _detectar_coluna(df, ["cliente", "client", "cod", "codigo"]) or None
+    value_col = _detectar_coluna(df, ["valor", "value", "amount", "total"]) or None
+
+    # Se não detectou cliente ou valor, tenta escolher colunas razoáveis
+    if client_col is None:
+        # procurar coluna com dtype int/str que pareça ser código
+        for c in df.columns:
+            if "empresa" in c.lower():  # evitar pegar empresa por engano
+                continue
+            if df[c].dtype == object or pd.api.types.is_integer_dtype(df[c]) or "cod" in c.lower():
+                client_col = c
+                break
+        if client_col is None:
+            # fallback: coluna 2
+            client_col = df.columns[2] if len(df.columns) > 2 else df.columns[0]
+
+    if value_col is None:
+        # procurar primeira coluna numérica ou com "valor" no nome
+        for c in df.columns:
+            if pd.api.types.is_numeric_dtype(df[c]):
+                value_col = c
+                break
+        if value_col is None:
+            value_col = df.columns[3] if len(df.columns) > 3 else df.columns[-1]
+
+    st.write(f"Usando colunas para verificar duplicados: Data = **{date_col}**, Cliente = **{client_col}**, Valor = **{value_col}**")
+
+    # Garantir coluna de sinalização
+    df = df.copy()
     df["Duplicado_Linha"] = ""
 
     primeira_ocorrencia = {}
 
-    # Preencher coluna Duplicado_Linha
+    # Preencher coluna Duplicado_Linha (ignorando horário — usamos apenas .date())
     for idx, row in df.iterrows():
-        conteudo = tuple(row.drop("Duplicado_Linha"))
-        if conteudo in primeira_ocorrencia:
-            # Segunda ocorrência em diante
-            df.at[idx, "Duplicado_Linha"] = f"Conteúdo já presente na linha {primeira_ocorrencia[conteudo] + 2}"
+        d, cliente_norm, valor_num = _normalizar_data_valor_cliente(row, date_col, client_col, value_col)
+        key = (d, cliente_norm, None if valor_num is None else round(valor_num, 2))
+        if key in primeira_ocorrencia and key[0] is not None and key[2] is not None and key[1] != "":
+            first_idx = primeira_ocorrencia[key]
+            df.at[idx, "Duplicado_Linha"] = f"Primeira ocorrência na linha {first_idx + 2}"
         else:
-            primeira_ocorrencia[conteudo] = idx
+            primeira_ocorrencia[key] = idx
 
-    # Salvar temporário
+    # Salvar temporário em Excel e usar openpyxl para pintar
     output = BytesIO()
     df.to_excel(output, index=False)
     output.seek(0)
@@ -58,7 +146,7 @@ def marcar_duplicados_verde(df):
     wb = load_workbook(output)
     ws = wb.active
 
-    verde = PatternFill(start_color="90EE90", end_color="90EE90", fill_type="solid")
+    vermelho = PatternFill(start_color="FFC7CE", end_color="FFC7CE", fill_type="solid")
     col_dup = df.columns.get_loc("Duplicado_Linha") + 1
 
     # Pintar apenas linhas que têm comentário na coluna Duplicado_Linha
@@ -66,7 +154,7 @@ def marcar_duplicados_verde(df):
         cell_value = ws.cell(row=row_idx, column=col_dup).value
         if cell_value and str(cell_value).strip() != "":
             for col in range(1, ws.max_column + 1):
-                ws.cell(row=row_idx, column=col).fill = verde
+                ws.cell(row=row_idx, column=col).fill = vermelho
 
     final_output = BytesIO()
     wb.save(final_output)
@@ -95,7 +183,7 @@ if df is not None:
     st.dataframe(df.head())
 
     if st.button("🔎 Validar Duplicados"):
-        arquivo_final, qtd_dup = marcar_duplicados_verde(df)
+        arquivo_final, qtd_dup = marcar_duplicados_vermelho(df)
 
         if qtd_dup > 0:
             st.success(f"✅ Foram encontradas {qtd_dup} linhas duplicadas (segunda ocorrência em diante).")
