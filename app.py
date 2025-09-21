@@ -7,11 +7,13 @@ from openpyxl.styles import PatternFill
 
 st.set_page_config(page_title="Validador de Duplicados", layout="centered")
 st.title("🎩✨ Validador de Duplicados")
-st.write("Suba uma planilha Excel ou informe o link público do Google Sheets para validar duplicados.")
+st.write("Suba uma planilha Excel ou CSV, ou informe o link público do Google Sheets para validar duplicados.")
 
 # ---------------- Funções ----------------
 def ler_planilha(caminho_ou_link):
-    if not isinstance(caminho_ou_link, str):
+    if hasattr(caminho_ou_link, 'name') and caminho_ou_link.name.endswith('.csv'):
+        return pd.read_csv(caminho_ou_link)
+    elif not isinstance(caminho_ou_link, str):
         return pd.read_excel(caminho_ou_link)
     if caminho_ou_link.startswith("http"):
         if "docs.google.com/spreadsheets" in caminho_ou_link:
@@ -33,20 +35,20 @@ def ler_planilha(caminho_ou_link):
     else:
         return pd.read_excel(caminho_ou_link)
 
-def marcar_duplicados_verde(df):
-    # Coluna para referência
-    df["Duplicado_Linha"] = ""
-    
-    primeira_ocorrencia = {}
-    
-    # Preencher coluna Duplicado_Linha
-    for idx, row in df.iterrows():
-        conteudo = tuple(row.drop("Duplicado_Linha"))
-        if conteudo in primeira_ocorrencia:
-            # Segunda ocorrência em diante
-            df.at[idx, "Duplicado_Linha"] = f"Conteúdo já presente na linha {primeira_ocorrencia[conteudo]+2}"
-        else:
-            primeira_ocorrencia[conteudo] = idx
+def marcar_duplicados_vermelho(df):
+    # Colunas para verificar duplicados
+    colunas_para_verificar = ["Cliente:", "Valor:", "Carimbo de data/hora"]
+
+    # Verificar se as colunas existem no DataFrame
+    for col in colunas_para_verificar:
+        if col not in df.columns:
+            st.error(f"A coluna '{col}' não foi encontrada na planilha.")
+            return None, 0
+
+    # Marcar todas as ocorrências de duplicados
+    duplicados = df.duplicated(subset=colunas_para_verificar, keep=False)
+    df["Status"] = ""
+    df.loc[duplicados, "Status"] = "Duplicada"
 
     # Salvar temporário
     output = BytesIO()
@@ -56,29 +58,29 @@ def marcar_duplicados_verde(df):
     wb = load_workbook(output)
     ws = wb.active
 
-    verde = PatternFill(start_color="90EE90", end_color="90EE90", fill_type="solid")
-    col_dup = df.columns.get_loc("Duplicado_Linha") + 1
+    vermelho = PatternFill(start_color="FF0000", end_color="FF0000", fill_type="solid")
+    col_status = df.columns.get_loc("Status") + 1
 
-    # Pintar apenas linhas que têm comentário na coluna Duplicado_Linha
+    # Pintar apenas linhas que são duplicadas
     for row_idx in range(2, ws.max_row + 1):
-        cell_value = ws.cell(row=row_idx, column=col_dup).value
-        if cell_value and str(cell_value).strip() != "":
+        cell_value = ws.cell(row=row_idx, column=col_status).value
+        if cell_value == "Duplicada":
             for col in range(1, ws.max_column + 1):
-                ws.cell(row=row_idx, column=col).fill = verde
+                ws.cell(row=row_idx, column=col).fill = vermelho
 
     final_output = BytesIO()
     wb.save(final_output)
     final_output.seek(0)
 
-    qtd_dup = (df["Duplicado_Linha"] != "").sum()
+    qtd_dup = duplicados.sum()
     return final_output, qtd_dup
 
 # ---------------- Interface ----------------
-tab1, tab2 = st.tabs(["📂 Upload Excel", "🔗 Link Google Sheets"])
+tab1, tab2 = st.tabs(["📂 Upload de Arquivo", "🔗 Link Google Sheets"])
 df = None
 
 with tab1:
-    uploaded_file = st.file_uploader("Selecione um arquivo Excel", type=["xlsx"])
+    uploaded_file = st.file_uploader("Selecione um arquivo Excel ou CSV", type=["xlsx", "csv"])
     if uploaded_file is not None:
         df = ler_planilha(uploaded_file)
 
@@ -92,16 +94,17 @@ if df is not None:
     st.dataframe(df.head())
 
     if st.button("🔎 Validar Duplicados"):
-        arquivo_final, qtd_dup = marcar_duplicados_verde(df)
+        arquivo_final, qtd_dup = marcar_duplicados_vermelho(df.copy()) # Usar uma cópia para não alterar o df original
 
         if qtd_dup > 0:
-            st.success(f"✅ Foram encontradas {qtd_dup} linhas duplicadas (segunda ocorrência em diante).")
+            st.success(f"✅ Foram encontradas {qtd_dup} linhas duplicadas.")
         else:
             st.info("Nenhuma linha duplicada encontrada.")
 
-        st.download_button(
-            label="📥 Baixar planilha validada",
-            data=arquivo_final,
-            file_name="planilha_validada.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        )
+        if arquivo_final:
+            st.download_button(
+                label="📥 Baixar planilha validada",
+                data=arquivo_final,
+                file_name="planilha_validada.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
